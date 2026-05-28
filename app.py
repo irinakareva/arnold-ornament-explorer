@@ -427,6 +427,65 @@ def figure_to_png_bytes(fig) -> bytes:
     return buf.getvalue()
 
 
+def params_to_key(P: dict) -> str:
+    """Stable JSON key for caching rendered plots."""
+    cleaned = {
+        "n": int(P["n"]),
+        "B": float(P["B"]),
+        "eps1": float(P["eps1"]),
+        "eps2": float(P["eps2"]),
+        "A2": [float(x) for x in P["A2"]],
+        "Rmax": float(P["Rmax"]),
+        "stopR": float(P["stopR"]),
+    }
+    return json.dumps(cleaned, sort_keys=True, separators=(",", ":"))
+
+
+@st.cache_data(show_spinner=False, max_entries=160)
+def cached_figure_png(
+    params_key: str,
+    quality: str,
+    use_sector: bool,
+    backward: bool,
+    show_eq: bool,
+    show_info: bool,
+    background: str,
+    line_alpha: float,
+    line_width: float,
+    seed_override: int | None,
+    time_override: float | None,
+    title: str | None,
+) -> bytes:
+    """Cache the expensive part: numerical integration + Matplotlib rendering."""
+    P = json.loads(params_key)
+    fig = make_figure(
+        P,
+        quality=quality,
+        use_sector=use_sector,
+        backward=backward,
+        show_eq=show_eq,
+        show_info=show_info,
+        background=background,
+        line_alpha=line_alpha,
+        line_width=line_width,
+        seed_override=seed_override,
+        time_override=time_override,
+        title=title,
+    )
+    png = figure_to_png_bytes(fig)
+    plt.close(fig)
+    return png
+
+
+def show_cached_figure(P: dict, **kwargs) -> bytes:
+    """Render once per unique parameter/settings combination, then reuse from cache."""
+    defaults = {"seed_override": None, "time_override": None, "title": None}
+    defaults.update(kwargs)
+    png = cached_figure_png(params_to_key(P), **defaults)
+    st.image(png, use_container_width=True)
+    return png
+
+
 # -----------------------------
 # Streamlit state helpers
 # -----------------------------
@@ -466,11 +525,11 @@ def current_params_from_widgets() -> dict:
 
 
 def render_plot_with_timer(P: dict, **kwargs):
+    # Kept for compatibility, but now routes through cache and returns PNG bytes.
     t0 = time.time()
-    fig = make_figure(P, **kwargs)
+    png = show_cached_figure(P, **kwargs)
     elapsed = time.time() - t0
-    st.pyplot(fig, clear_figure=False, use_container_width=True)
-    return fig, elapsed
+    return png, elapsed
 
 
 def pattern_vocab_card():
@@ -513,16 +572,23 @@ with st.sidebar:
     )
     show_eq = st.toggle("Show equilibrium markers", value=True)
     st.caption("Fast uses the original v1 render settings. Forward + backward is on by default because it makes the flower/separatrix structure fuller.")
+    if st.button("Clear plot cache"):
+        st.cache_data.clear()
+        st.rerun()
     show_info = st.toggle("Show info box", value=True)
     line_alpha = st.slider("Line opacity", 0.05, 1.0, 0.65, 0.05)
     line_width = st.slider("Line width", 0.15, 2.0, 0.55, 0.05)
 
 
-tab_presets, tab_sweep, tab_explore, tab_render, tab_about = st.tabs([
-    "Paper presets", "Sweep / zoom", "Explore", "Render / export", "About"
-])
+PAGES = ["Paper presets", "Sweep / zoom", "Explore", "Render / export", "About"]
+try:
+    page = st.segmented_control("Navigation", PAGES, default="Paper presets", label_visibility="collapsed")
+except Exception:
+    page = st.radio("Navigation", PAGES, index=0, horizontal=True, label_visibility="collapsed")
 
-with tab_about:
+st.caption("Cloud-optimized version: only the selected page renders, and repeated plots are cached by parameter set.")
+
+if page == "About":
     left, right = st.columns([1.15, 1])
     with left:
         st.subheader("About / reference")
@@ -555,7 +621,7 @@ with tab_about:
         pattern_vocab_card()
         st.info("Marker convention: white/black + = origin, red × ≈ saddle-like peripheral point, green ○ ≈ center-like peripheral point. The current saddle/center labeling follows the MATLAB visual convention and should be verified for edge cases.")
 
-with tab_presets:
+if page == "Paper presets":
     st.subheader("Paper preset selector")
     options = {f"{p.id}. {p.fig} — {p.label}": p.id for p in PRESETS}
     selection = st.selectbox("Preset", list(options.keys()), index=0)
@@ -600,7 +666,7 @@ with tab_presets:
         )
         st.caption(f"Rendered in {elapsed:.1f} seconds. Pattern heuristic: {classify_pattern(P)}")
 
-with tab_explore:
+if page == "Explore":
     st.subheader("Manual exploration")
     st.caption("A Fast preview is shown by default. Edit parameters in the form, then click Update preview; slider changes are not applied until you press the button.")
     p0 = st.session_state.params
@@ -663,7 +729,7 @@ with tab_explore:
         except ValueError as exc:
             st.error(str(exc))
 
-with tab_sweep:
+if page == "Sweep / zoom":
     st.subheader("One-parameter sweep")
     st.markdown("This is the MATLAB sweep workflow translated into the app: hold the current explorer parameters fixed and vary one parameter over six values.")
     try:
@@ -697,6 +763,10 @@ with tab_sweep:
 
     vals_display = ", ".join(f"{v:g}" if isinstance(v, float) else str(v) for v in vals)
     st.caption(f"Will render {len(vals)} panels using these exact {sweep_param} values: [{vals_display}]. Only `{sweep_param}` changes; all other parameters come from the current Explore settings.")
+    run_sweep = st.button("Run sweep", type="primary")
+    if not run_sweep:
+        st.info("Click Run sweep to render the panels. This avoids recomputing all six plots every time the page loads on Streamlit Cloud.")
+        st.stop()
 
     ncols = 3
     rows = math.ceil(len(vals) / ncols)
@@ -725,7 +795,7 @@ with tab_sweep:
                 P["eps1"] = float(v)
             with col:
                 st.markdown(f"**{sweep_param} = {v:g}**  ")
-                fig = make_figure(
+                show_cached_figure(
                     P,
                     quality=sweep_quality,
                     use_sector=use_sector,
@@ -735,9 +805,10 @@ with tab_sweep:
                     background=background,
                     line_alpha=line_alpha,
                     line_width=line_width,
+                    seed_override=None,
+                    time_override=None,
                     title=f"{sweep_param}={v:g} | {classify_pattern(P)}",
                 )
-                st.pyplot(fig, clear_figure=True, use_container_width=True)
                 st.caption(classify_pattern(P))
                 st.download_button(
                     "Params JSON",
@@ -748,7 +819,7 @@ with tab_sweep:
                 )
             idx += 1
 
-with tab_render:
+if page == "Render / export":
     st.subheader("Render and export")
     st.markdown("Use this after the fast or regular preview is promising. Detailed mode uses larger seed counts and longer integration times.")
     try:
@@ -765,7 +836,7 @@ with tab_render:
         export_format = st.radio("Export", ["PNG", "Parameters JSON"], horizontal=True)
         st.table({"Parameter": ["n", "B", "eps1", "eps2", "A2", "Rmax", "stopR"], "Value": [P["n"], P["B"], P["eps1"], P["eps2"], str(P["A2"]), P["Rmax"], P["stopR"]]})
     with c2:
-        fig, elapsed = render_plot_with_timer(
+        png, elapsed = render_plot_with_timer(
             P,
             quality=dense_quality,
             use_sector=use_sector,
@@ -777,10 +848,10 @@ with tab_render:
             line_width=line_width,
             seed_override=seed_override,
             time_override=time_override,
+            title=None,
         )
-        st.caption(f"Rendered in {elapsed:.1f} seconds. Pattern heuristic: {classify_pattern(P)}")
+        st.caption(f"Displayed in {elapsed:.1f} seconds; repeated renders are cached. Pattern heuristic: {classify_pattern(P)}")
         if export_format == "PNG":
-            png = figure_to_png_bytes(fig)
             st.download_button("Download PNG", data=png, file_name="arnold_ornament_render.png", mime="image/png")
         else:
             st.download_button("Download parameters JSON", data=json.dumps(P, indent=2), file_name="arnold_ornament_parameters.json", mime="application/json")

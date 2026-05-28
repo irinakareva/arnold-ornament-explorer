@@ -10,20 +10,38 @@ pip install -r requirements.txt
 streamlit run app.py
 ```
 
+On Windows, if `streamlit` is not recognized, use:
+
+```bat
+python -m streamlit run app.py
+```
+
 ## Current status
 
-This is a first functional Python/Streamlit prototype. It ports the polar-coordinate model from the MATLAB scripts and includes:
+This is a functional Python/Streamlit prototype. It ports the polar-coordinate model from the MATLAB scripts and includes:
 
 - paper preset selector
 - custom parameter explorer
 - one-parameter sweep/zoom workflow
-- dense render/export page
+- render/export page
 - forward + backward integration toggle
 - sector-symmetry toggle
 - equilibrium markers
 - PNG and parameter JSON export
+- cloud-oriented caching of rendered plots
+- conditional page rendering so inactive pages do not recompute plots
 
 Outputs should be treated as qualitative until selected presets are visually checked against the MATLAB figures.
+
+## Cloud performance notes
+
+Streamlit Community Cloud is slower than most local laptops for dense numerical integration. This version reduces unnecessary recomputation by:
+
+1. rendering only the selected page,
+2. caching figures by parameter set and render settings,
+3. requiring an explicit button click before running a six-panel sweep.
+
+If the app still feels slow, use Fast mode and avoid Detailed renders until the parameter set is promising.
 
 ## Model
 
