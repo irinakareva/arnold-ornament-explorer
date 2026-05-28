@@ -580,48 +580,14 @@ with st.sidebar:
     line_width = st.slider("Line width", 0.15, 2.0, 0.55, 0.05)
 
 
+
 PAGES = ["Paper presets", "Sweep / zoom", "Explore", "Render / export", "About"]
-try:
-    page = st.segmented_control("Navigation", PAGES, default="Paper presets", label_visibility="collapsed")
-except Exception:
-    page = st.radio("Navigation", PAGES, index=0, horizontal=True, label_visibility="collapsed")
+st.info("First load on Streamlit Cloud may be slow because figures are computed and cached. After that, repeated presets/settings should be faster.")
+st.caption("Cached version: the original tab interface is restored, while expensive plots are cached by parameter set and render settings.")
 
-st.caption("Cloud-optimized version: only the selected page renders, and repeated plots are cached by parameter set.")
+tab_presets, tab_sweep, tab_explore, tab_render, tab_about = st.tabs(PAGES)
 
-if page == "About":
-    left, right = st.columns([1.15, 1])
-    with left:
-        st.subheader("About / reference")
-        st.markdown(
-            """
-            Reference: **Berezovskaya & Karev, “Arnold’s Weak Resonance Equation as the Model of Greek Ornamental Design.”**
-
-            This app is meant to reproduce the working MATLAB workflow in a single Python/Streamlit interface:
-            paper-preset inspection, one-parameter sweeps, custom parameter exploration, zooms, and slower dense rendering.
-
-            The current version is a **first functional prototype**. It uses the polar-coordinate system from the MATLAB scripts,
-            with optional sector symmetry and optional backward integration. The rendered figures should be treated as qualitative
-            phase-portrait previews until we compare selected presets directly against the MATLAB outputs.
-            """
-        )
-        st.subheader("Model integrated by the app")
-        st.latex(r"\dot r = \epsilon_1 r + \sum_{k=1}^{s} A^2_k r^{2k+1} + B r^{n-1}\cos(n\phi)")
-        st.latex(r"\dot \phi = \epsilon_2 + \sum_{k=1}^{s} A^2_k r^{2k} - B r^{n-2}\sin(n\phi)")
-        st.markdown(r"where $s=\lfloor n/2\rfloor-1$.")
-    with right:
-        st.subheader("Workflow")
-        st.markdown(
-            """
-            1. Start with **Paper presets** to reproduce known regimes.  
-            2. Use **Sweep / zoom** to scan exact values for one parameter.  
-            3. Move into **Explore** for manual adjustment.  
-            4. Use **Render / export** only after the fast preview is promising.
-            """
-        )
-        pattern_vocab_card()
-        st.info("Marker convention: white/black + = origin, red × ≈ saddle-like peripheral point, green ○ ≈ center-like peripheral point. The current saddle/center labeling follows the MATLAB visual convention and should be verified for edge cases.")
-
-if page == "Paper presets":
+with tab_presets:
     st.subheader("Paper preset selector")
     options = {f"{p.id}. {p.fig} — {p.label}": p.id for p in PRESETS}
     selection = st.selectbox("Preset", list(options.keys()), index=0)
@@ -652,7 +618,7 @@ if page == "Paper presets":
             st.success(f"Loaded preset {selected.id}: {selected.fig}")
     with c2:
         P = selected.parameter_dict()
-        fig, elapsed = render_plot_with_timer(
+        png, elapsed = render_plot_with_timer(
             P,
             quality=quality,
             use_sector=use_sector,
@@ -666,7 +632,96 @@ if page == "Paper presets":
         )
         st.caption(f"Rendered in {elapsed:.1f} seconds. Pattern heuristic: {classify_pattern(P)}")
 
-if page == "Explore":
+with tab_sweep:
+    st.subheader("One-parameter sweep")
+    st.markdown("This is the MATLAB sweep workflow translated into the app: hold the current explorer parameters fixed and vary one parameter over exact values.")
+    try:
+        base = current_params_from_widgets()
+    except ValueError:
+        base = PRESET_BY_ID[7].parameter_dict()
+        st.warning("Using preset 7 as sweep base because the current A2 field could not be parsed.")
+    c1, c2 = st.columns([0.35, 0.65])
+    with c1:
+        sweep_param = st.selectbox("Parameter to vary", ["B", "A2_1", "n", "eps2", "eps1"])
+        sweep_quality = st.selectbox("Sweep quality", ["Fast", "Regular"], index=0)
+    with c2:
+        st.markdown("**Exact test values**")
+        st.caption("These are the individual values that will be rendered as separate panels, not the endpoints of a continuous range.")
+        vals_text = st.text_input(
+            "Enter values as a Python-style list",
+            value=str(SWEEP_DEFAULTS[sweep_param]),
+            help="Example: [-1.5, -0.5, -0.15, 0.15, 0.5, 1.5]. Each entry becomes one sweep panel.",
+        )
+    try:
+        vals = ast.literal_eval(vals_text)
+        if not isinstance(vals, list) or len(vals) < 2:
+            raise ValueError
+        if sweep_param == "n":
+            vals = [int(round(float(v))) for v in vals]
+        else:
+            vals = [float(v) for v in vals]
+    except Exception:
+        vals = SWEEP_DEFAULTS[sweep_param]
+        st.warning("Could not parse exact test values; using defaults.")
+
+    vals_display = ", ".join(f"{v:g}" if isinstance(v, float) else str(v) for v in vals)
+    st.caption(f"Will render {len(vals)} panels using these exact {sweep_param} values: [{vals_display}]. Only `{sweep_param}` changes; all other parameters come from the current Explore settings.")
+    run_sweep = st.button("Run sweep", type="primary")
+    if not run_sweep:
+        st.info("Click Run sweep to render the panels. This avoids recomputing all six plots every time the app loads on Streamlit Cloud.")
+    else:
+        ncols = 3
+        rows = math.ceil(len(vals) / ncols)
+        idx = 0
+        for _row in range(rows):
+            cols = st.columns(ncols)
+            for col in cols:
+                if idx >= len(vals):
+                    continue
+                v = vals[idx]
+                P = dict(base)
+                P["A2"] = list(base["A2"])
+                if sweep_param == "B":
+                    P["B"] = float(v)
+                elif sweep_param == "A2_1":
+                    if not P["A2"]:
+                        P["A2"] = [0.0]
+                    P["A2"][0] = float(v)
+                    P["A2"] = pad_A2(int(P["n"]), P["A2"])
+                elif sweep_param == "n":
+                    P["n"] = int(round(v))
+                    P["A2"] = pad_A2(int(P["n"]), P["A2"])
+                elif sweep_param == "eps2":
+                    P["eps2"] = float(v)
+                elif sweep_param == "eps1":
+                    P["eps1"] = float(v)
+                with col:
+                    st.markdown(f"**{sweep_param} = {v:g}**  ")
+                    show_cached_figure(
+                        P,
+                        quality=sweep_quality,
+                        use_sector=use_sector,
+                        backward=backward,
+                        show_eq=show_eq,
+                        show_info=False,
+                        background=background,
+                        line_alpha=line_alpha,
+                        line_width=line_width,
+                        seed_override=None,
+                        time_override=None,
+                        title=f"{sweep_param}={v:g} | {classify_pattern(P)}",
+                    )
+                    st.caption(classify_pattern(P))
+                    st.download_button(
+                        "Params JSON",
+                        data=json.dumps(P, indent=2),
+                        file_name=f"sweep_{sweep_param}_{idx+1}.json",
+                        mime="application/json",
+                        key=f"sweep_json_{idx}",
+                    )
+                idx += 1
+
+with tab_explore:
     st.subheader("Manual exploration")
     st.caption("A Fast preview is shown by default. Edit parameters in the form, then click Update preview; slider changes are not applied until you press the button.")
     p0 = st.session_state.params
@@ -693,7 +748,7 @@ if page == "Explore":
                 st.session_state.params = P_new
                 st.success("Preview updated.")
             P = st.session_state.params
-            fig, elapsed = render_plot_with_timer(
+            png, elapsed = render_plot_with_timer(
                 P,
                 quality=quality,
                 use_sector=use_sector,
@@ -729,97 +784,7 @@ if page == "Explore":
         except ValueError as exc:
             st.error(str(exc))
 
-if page == "Sweep / zoom":
-    st.subheader("One-parameter sweep")
-    st.markdown("This is the MATLAB sweep workflow translated into the app: hold the current explorer parameters fixed and vary one parameter over six values.")
-    try:
-        base = current_params_from_widgets()
-    except ValueError:
-        base = PRESET_BY_ID[7].parameter_dict()
-        st.warning("Using preset 7 as sweep base because the current A2 field could not be parsed.")
-    c1, c2 = st.columns([0.35, 0.65])
-    with c1:
-        sweep_param = st.selectbox("Parameter to vary", ["B", "A2_1", "n", "eps2", "eps1"])
-        sweep_quality = st.selectbox("Sweep quality", ["Fast", "Regular"], index=0)
-    with c2:
-        st.markdown("**Exact test values**")
-        st.caption("These are the individual values that will be rendered as separate panels, not the endpoints of a continuous range.")
-        vals_text = st.text_input(
-            "Enter values as a Python-style list",
-            value=str(SWEEP_DEFAULTS[sweep_param]),
-            help="Example: [-1.5, -0.5, -0.15, 0.15, 0.5, 1.5]. Each entry becomes one sweep panel."
-        )
-    try:
-        vals = ast.literal_eval(vals_text)
-        if not isinstance(vals, list) or len(vals) < 2:
-            raise ValueError
-        if sweep_param == "n":
-            vals = [int(round(float(v))) for v in vals]
-        else:
-            vals = [float(v) for v in vals]
-    except Exception:
-        vals = SWEEP_DEFAULTS[sweep_param]
-        st.warning("Could not parse exact test values; using defaults.")
-
-    vals_display = ", ".join(f"{v:g}" if isinstance(v, float) else str(v) for v in vals)
-    st.caption(f"Will render {len(vals)} panels using these exact {sweep_param} values: [{vals_display}]. Only `{sweep_param}` changes; all other parameters come from the current Explore settings.")
-    run_sweep = st.button("Run sweep", type="primary")
-    if not run_sweep:
-        st.info("Click Run sweep to render the panels. This avoids recomputing all six plots every time the page loads on Streamlit Cloud.")
-        st.stop()
-
-    ncols = 3
-    rows = math.ceil(len(vals) / ncols)
-    idx = 0
-    for _row in range(rows):
-        cols = st.columns(ncols)
-        for col in cols:
-            if idx >= len(vals):
-                continue
-            v = vals[idx]
-            P = dict(base)
-            P["A2"] = list(base["A2"])
-            if sweep_param == "B":
-                P["B"] = float(v)
-            elif sweep_param == "A2_1":
-                if not P["A2"]:
-                    P["A2"] = [0.0]
-                P["A2"][0] = float(v)
-                P["A2"] = pad_A2(int(P["n"]), P["A2"])
-            elif sweep_param == "n":
-                P["n"] = int(round(v))
-                P["A2"] = pad_A2(int(P["n"]), P["A2"])
-            elif sweep_param == "eps2":
-                P["eps2"] = float(v)
-            elif sweep_param == "eps1":
-                P["eps1"] = float(v)
-            with col:
-                st.markdown(f"**{sweep_param} = {v:g}**  ")
-                show_cached_figure(
-                    P,
-                    quality=sweep_quality,
-                    use_sector=use_sector,
-                    backward=backward,
-                    show_eq=show_eq,
-                    show_info=False,
-                    background=background,
-                    line_alpha=line_alpha,
-                    line_width=line_width,
-                    seed_override=None,
-                    time_override=None,
-                    title=f"{sweep_param}={v:g} | {classify_pattern(P)}",
-                )
-                st.caption(classify_pattern(P))
-                st.download_button(
-                    "Params JSON",
-                    data=json.dumps(P, indent=2),
-                    file_name=f"sweep_{sweep_param}_{idx+1}.json",
-                    mime="application/json",
-                    key=f"sweep_json_{idx}",
-                )
-            idx += 1
-
-if page == "Render / export":
+with tab_render:
     st.subheader("Render and export")
     st.markdown("Use this after the fast or regular preview is promising. Detailed mode uses larger seed counts and longer integration times.")
     try:
@@ -835,23 +800,60 @@ if page == "Render / export":
         time_override = st.slider("Integration time override", 50, 1000, 350, 25)
         export_format = st.radio("Export", ["PNG", "Parameters JSON"], horizontal=True)
         st.table({"Parameter": ["n", "B", "eps1", "eps2", "A2", "Rmax", "stopR"], "Value": [P["n"], P["B"], P["eps1"], P["eps2"], str(P["A2"]), P["Rmax"], P["stopR"]]})
+        run_render = st.button("Render export figure", type="primary")
     with c2:
-        png, elapsed = render_plot_with_timer(
-            P,
-            quality=dense_quality,
-            use_sector=use_sector,
-            backward=backward,
-            show_eq=show_eq,
-            show_info=show_info,
-            background=background,
-            line_alpha=line_alpha,
-            line_width=line_width,
-            seed_override=seed_override,
-            time_override=time_override,
-            title=None,
-        )
-        st.caption(f"Displayed in {elapsed:.1f} seconds; repeated renders are cached. Pattern heuristic: {classify_pattern(P)}")
-        if export_format == "PNG":
-            st.download_button("Download PNG", data=png, file_name="arnold_ornament_render.png", mime="image/png")
+        if not run_render:
+            st.info("Click Render export figure when you are ready. This prevents detailed rendering during the first cloud load.")
         else:
-            st.download_button("Download parameters JSON", data=json.dumps(P, indent=2), file_name="arnold_ornament_parameters.json", mime="application/json")
+            png, elapsed = render_plot_with_timer(
+                P,
+                quality=dense_quality,
+                use_sector=use_sector,
+                backward=backward,
+                show_eq=show_eq,
+                show_info=show_info,
+                background=background,
+                line_alpha=line_alpha,
+                line_width=line_width,
+                seed_override=seed_override,
+                time_override=time_override,
+                title=None,
+            )
+            st.caption(f"Displayed in {elapsed:.1f} seconds; repeated renders are cached. Pattern heuristic: {classify_pattern(P)}")
+            if export_format == "PNG":
+                st.download_button("Download PNG", data=png, file_name="arnold_ornament_render.png", mime="image/png")
+            else:
+                st.download_button("Download parameters JSON", data=json.dumps(P, indent=2), file_name="arnold_ornament_parameters.json", mime="application/json")
+
+with tab_about:
+    left, right = st.columns([1.15, 1])
+    with left:
+        st.subheader("About / reference")
+        st.markdown(
+            """
+            Reference: **Berezovskaya & Karev, “Arnold’s Weak Resonance Equation as the Model of Greek Ornamental Design.”**
+
+            This app is meant to reproduce the working MATLAB workflow in a single Python/Streamlit interface:
+            paper-preset inspection, one-parameter sweeps, custom parameter exploration, zooms, and slower dense rendering.
+
+            The current version is a **first functional prototype**. It uses the polar-coordinate system from the MATLAB scripts,
+            with optional sector symmetry and optional backward integration. The rendered figures should be treated as qualitative
+            phase-portrait previews until we compare selected presets directly against the MATLAB outputs.
+            """
+        )
+        st.subheader("Model integrated by the app")
+        st.latex(r"\dot r = \epsilon_1 r + \sum_{k=1}^{s} A^2_k r^{2k+1} + B r^{n-1}\cos(n\phi)")
+        st.latex(r"\dot \phi = \epsilon_2 + \sum_{k=1}^{s} A^2_k r^{2k} - B r^{n-2}\sin(n\phi)")
+        st.markdown(r"where $s=\lfloor n/2\rfloor-1$.")
+    with right:
+        st.subheader("Workflow")
+        st.markdown(
+            """
+            1. Start with **Paper presets** to reproduce known regimes.  
+            2. Use **Sweep / zoom** to scan exact values for one parameter.  
+            3. Move into **Explore** for manual adjustment.  
+            4. Use **Render / export** only after the fast preview is promising.
+            """
+        )
+        pattern_vocab_card()
+        st.info("Marker convention: white/black + = origin, red × ≈ saddle-like peripheral point, green ○ ≈ center-like peripheral point. The current saddle/center labeling follows the MATLAB visual convention and should be verified for edge cases.")
