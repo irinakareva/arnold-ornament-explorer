@@ -826,7 +826,7 @@ with tab_explore:
 
 with tab_render:
     st.subheader("Render and export")
-    st.markdown("Use this after the fast or regular preview is promising. Detailed mode uses larger seed counts and longer integration times.")
+    st.markdown("Use this after the fast or regular preview is promising. The export page now shows a fast preview first; high-quality rendering runs only when you explicitly request it.")
     try:
         P = current_params_from_widgets()
     except ValueError:
@@ -835,18 +835,43 @@ with tab_render:
 
     c1, c2 = st.columns([0.32, 0.68])
     with c1:
-        dense_quality = st.selectbox("Render mode", ["Regular", "Detailed"], index=1)
-        seed_override = st.slider("Seed density override", 5, 40, 16, 1)
-        time_override = st.slider("Integration time override", 50, 1000, 350, 25)
+        dense_quality = st.selectbox("Export-quality render mode", ["Regular", "Detailed"], index=1)
+        seed_override = st.slider("Export seed density override", 5, 40, 16, 1)
+        time_override = st.slider("Export integration time override", 50, 1000, 350, 25)
         export_format = st.radio("Export", ["PNG", "Parameters JSON"], horizontal=True)
+        st.markdown("**Current export parameters**")
         st.table({"Parameter": ["n", "B", "eps1", "eps2", "A2", "Rmax", "stopR"], "Value": [P["n"], P["B"], P["eps1"], P["eps2"], str(P["A2"]), P["Rmax"], P["stopR"]]})
-        run_render = st.button("Render export figure", type="primary")
+        render_export = st.button("Render high-quality export", type="primary", use_container_width=True)
+        clear_export = st.button("Clear saved export render", use_container_width=True)
+        if clear_export:
+            st.session_state.pop("export_render", None)
+            st.rerun()
+
     with c2:
-        if not run_render:
-            st.info("Click Render export figure when you are ready. This prevents detailed rendering during the first cloud load.")
-        else:
-            png, elapsed = render_plot_with_timer(
-                P,
+        st.markdown("### Fast preview")
+        st.caption("Use this to check the pattern, zoom/window, and current parameters before spending time on the export-quality render.")
+        preview_png, preview_elapsed = render_plot_with_timer(
+            P,
+            quality="Fast",
+            use_sector=use_sector,
+            backward=backward,
+            show_eq=show_eq,
+            show_info=show_info,
+            background=background,
+            line_alpha=line_alpha,
+            line_width=line_width,
+            seed_override=None,
+            time_override=None,
+            title="Fast export preview",
+        )
+        st.caption(f"Fast preview displayed in {preview_elapsed:.1f} seconds. Repeated previews are cached.")
+
+        st.divider()
+        st.markdown("### Export-quality render")
+        if render_export:
+            t0 = time.time()
+            export_png = cached_figure_png(
+                params_to_key(P),
                 quality=dense_quality,
                 use_sector=use_sector,
                 backward=backward,
@@ -857,13 +882,31 @@ with tab_render:
                 line_width=line_width,
                 seed_override=seed_override,
                 time_override=time_override,
-                title=None,
+                title="Export-quality render",
             )
-            st.caption(f"Displayed in {elapsed:.1f} seconds; repeated renders are cached. Pattern heuristic: {classify_pattern(P)}")
+            st.session_state.export_render = {
+                "png": export_png,
+                "params": P,
+                "quality": dense_quality,
+                "seed_override": seed_override,
+                "time_override": time_override,
+                "elapsed": time.time() - t0,
+            }
+
+        saved_export = st.session_state.get("export_render")
+        if saved_export is None:
+            st.info("Click Render high-quality export only after the fast preview looks right. The result will stay visible here until you render again or clear it.")
+        else:
+            st.image(saved_export["png"], use_container_width=True)
+            st.caption(
+                f"Saved export render: {saved_export['quality']} mode, "
+                f"seed override {saved_export['seed_override']}, time override {saved_export['time_override']}. "
+                f"Displayed/generated in {saved_export['elapsed']:.1f} seconds; repeated renders are cached."
+            )
             if export_format == "PNG":
-                st.download_button("Download PNG", data=png, file_name="arnold_ornament_render.png", mime="image/png")
+                st.download_button("Download export PNG", data=saved_export["png"], file_name="arnold_ornament_render.png", mime="image/png")
             else:
-                st.download_button("Download parameters JSON", data=json.dumps(P, indent=2), file_name="arnold_ornament_parameters.json", mime="application/json")
+                st.download_button("Download parameters JSON", data=json.dumps(saved_export["params"], indent=2), file_name="arnold_ornament_parameters.json", mime="application/json")
 
 with tab_about:
     left, right = st.columns([1.15, 1])

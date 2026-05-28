@@ -30,6 +30,8 @@ This is a functional Python/Streamlit prototype. It ports the polar-coordinate m
 - PNG and parameter JSON export
 - cloud-oriented caching of rendered plots
 - sweep results persist across tab changes until a new sweep is run
+- export page shows a fast preview before running high-quality export
+- export-quality render persists until rerun or cleared
 
 Outputs should be treated as qualitative until selected presets are visually checked against the MATLAB figures.
 
@@ -39,7 +41,8 @@ Streamlit Community Cloud is slower than most local laptops for dense numerical 
 
 1. caching figures by parameter set and render settings,
 2. requiring an explicit button click before running a six-panel sweep,
-3. preserving the most recent sweep in session state when switching tabs.
+3. preserving the most recent sweep in session state when switching tabs,
+4. showing only a Fast preview on the export page until the user explicitly asks for export-quality rendering.
 
 If the app still feels slow, use Fast mode and avoid Detailed renders until the parameter set is promising.
 
