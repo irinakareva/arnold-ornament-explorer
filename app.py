@@ -667,57 +667,97 @@ with tab_sweep:
     vals_display = ", ".join(f"{v:g}" if isinstance(v, float) else str(v) for v in vals)
     st.caption(f"Will render {len(vals)} panels using these exact {sweep_param} values: [{vals_display}]. Only `{sweep_param}` changes; all other parameters come from the current Explore settings.")
     run_sweep = st.button("Run sweep", type="primary")
-    if not run_sweep:
-        st.info("Click Run sweep to render the panels. This avoids recomputing all six plots every time the app loads on Streamlit Cloud.")
+
+    def build_sweep_results(base_params: dict, param_name: str, test_values: list, quality_name: str) -> dict:
+        """Build a session-state record of the requested sweep.
+
+        This stores the parameter sets and the render settings used at the time the
+        sweep was run. The images themselves remain in st.cache_data, but this
+        record lets the panels stay visible when the user changes tabs and returns.
+        """
+        panels = []
+        for idx, v in enumerate(test_values):
+            P = dict(base_params)
+            P["A2"] = list(base_params["A2"])
+            if param_name == "B":
+                P["B"] = float(v)
+            elif param_name == "A2_1":
+                if not P["A2"]:
+                    P["A2"] = [0.0]
+                P["A2"][0] = float(v)
+                P["A2"] = pad_A2(int(P["n"]), P["A2"])
+            elif param_name == "n":
+                P["n"] = int(round(v))
+                P["A2"] = pad_A2(int(P["n"]), P["A2"])
+            elif param_name == "eps2":
+                P["eps2"] = float(v)
+            elif param_name == "eps1":
+                P["eps1"] = float(v)
+            panels.append({
+                "idx": idx,
+                "value": v,
+                "params": P,
+                "pattern": classify_pattern(P),
+            })
+        return {
+            "sweep_param": param_name,
+            "values_display": ", ".join(f"{v:g}" if isinstance(v, float) else str(v) for v in test_values),
+            "quality": quality_name,
+            "use_sector": use_sector,
+            "backward": backward,
+            "show_eq": show_eq,
+            "background": background,
+            "line_alpha": line_alpha,
+            "line_width": line_width,
+            "panels": panels,
+        }
+
+    if run_sweep:
+        st.session_state.sweep_results = build_sweep_results(base, sweep_param, vals, sweep_quality)
+
+    sweep_results = st.session_state.get("sweep_results")
+    if sweep_results is None:
+        st.info("Click Run sweep to render the panels. The most recent sweep will stay visible until you run a new sweep.")
     else:
+        st.success(
+            f"Showing saved sweep: {len(sweep_results['panels'])} panels for "
+            f"{sweep_results['sweep_param']} = [{sweep_results['values_display']}]. "
+            "These panels will stay here until you run a new sweep."
+        )
         ncols = 3
-        rows = math.ceil(len(vals) / ncols)
+        rows = math.ceil(len(sweep_results["panels"]) / ncols)
         idx = 0
         for _row in range(rows):
             cols = st.columns(ncols)
             for col in cols:
-                if idx >= len(vals):
+                if idx >= len(sweep_results["panels"]):
                     continue
-                v = vals[idx]
-                P = dict(base)
-                P["A2"] = list(base["A2"])
-                if sweep_param == "B":
-                    P["B"] = float(v)
-                elif sweep_param == "A2_1":
-                    if not P["A2"]:
-                        P["A2"] = [0.0]
-                    P["A2"][0] = float(v)
-                    P["A2"] = pad_A2(int(P["n"]), P["A2"])
-                elif sweep_param == "n":
-                    P["n"] = int(round(v))
-                    P["A2"] = pad_A2(int(P["n"]), P["A2"])
-                elif sweep_param == "eps2":
-                    P["eps2"] = float(v)
-                elif sweep_param == "eps1":
-                    P["eps1"] = float(v)
+                panel = sweep_results["panels"][idx]
+                v = panel["value"]
+                P = panel["params"]
                 with col:
-                    st.markdown(f"**{sweep_param} = {v:g}**  ")
+                    st.markdown(f"**{sweep_results['sweep_param']} = {v:g}**  ")
                     show_cached_figure(
                         P,
-                        quality=sweep_quality,
-                        use_sector=use_sector,
-                        backward=backward,
-                        show_eq=show_eq,
+                        quality=sweep_results["quality"],
+                        use_sector=sweep_results["use_sector"],
+                        backward=sweep_results["backward"],
+                        show_eq=sweep_results["show_eq"],
                         show_info=False,
-                        background=background,
-                        line_alpha=line_alpha,
-                        line_width=line_width,
+                        background=sweep_results["background"],
+                        line_alpha=sweep_results["line_alpha"],
+                        line_width=sweep_results["line_width"],
                         seed_override=None,
                         time_override=None,
-                        title=f"{sweep_param}={v:g} | {classify_pattern(P)}",
+                        title=f"{sweep_results['sweep_param']}={v:g} | {panel['pattern']}",
                     )
-                    st.caption(classify_pattern(P))
+                    st.caption(panel["pattern"])
                     st.download_button(
                         "Params JSON",
                         data=json.dumps(P, indent=2),
-                        file_name=f"sweep_{sweep_param}_{idx+1}.json",
+                        file_name=f"sweep_{sweep_results['sweep_param']}_{idx+1}.json",
                         mime="application/json",
-                        key=f"sweep_json_{idx}",
+                        key=f"sweep_json_saved_{idx}",
                     )
                 idx += 1
 

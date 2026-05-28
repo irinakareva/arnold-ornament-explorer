@@ -29,7 +29,7 @@ This is a functional Python/Streamlit prototype. It ports the polar-coordinate m
 - equilibrium markers
 - PNG and parameter JSON export
 - cloud-oriented caching of rendered plots
-- conditional page rendering so inactive pages do not recompute plots
+- sweep results persist across tab changes until a new sweep is run
 
 Outputs should be treated as qualitative until selected presets are visually checked against the MATLAB figures.
 
@@ -37,9 +37,9 @@ Outputs should be treated as qualitative until selected presets are visually che
 
 Streamlit Community Cloud is slower than most local laptops for dense numerical integration. This version reduces unnecessary recomputation by:
 
-1. rendering only the selected page,
-2. caching figures by parameter set and render settings,
-3. requiring an explicit button click before running a six-panel sweep.
+1. caching figures by parameter set and render settings,
+2. requiring an explicit button click before running a six-panel sweep,
+3. preserving the most recent sweep in session state when switching tabs.
 
 If the app still feels slow, use Fast mode and avoid Detailed renders until the parameter set is promising.
 
