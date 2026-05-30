@@ -545,6 +545,10 @@ def pattern_vocab_card():
     )
 
 
+def marker_legend():
+    st.caption("Markers: red × = saddle equilibrium; green ○ = center equilibrium; white/black + = origin.")
+
+
 # -----------------------------
 # App UI
 # -----------------------------
@@ -630,6 +634,8 @@ with tab_presets:
             line_width=line_width,
             title=f"Preset {selected.id}: {selected.fig} — {selected.label}",
         )
+        if show_eq:
+            marker_legend()
         st.caption(f"Rendered in {elapsed:.1f} seconds. Pattern heuristic: {classify_pattern(P)}")
 
 with tab_sweep:
@@ -751,6 +757,8 @@ with tab_sweep:
                         time_override=None,
                         title=f"{sweep_results['sweep_param']}={v:g} | {panel['pattern']}",
                     )
+                    if sweep_results["show_eq"]:
+                        marker_legend()
                     st.caption(panel["pattern"])
                     st.download_button(
                         "Params JSON",
@@ -799,6 +807,8 @@ with tab_explore:
                 line_alpha=line_alpha,
                 line_width=line_width,
             )
+            if show_eq:
+                marker_legend()
             st.caption(f"Rendered in {elapsed:.1f} seconds. Pattern heuristic: {classify_pattern(P)}")
             st.markdown("**Current parameter set**")
             st.table({
@@ -864,6 +874,8 @@ with tab_render:
             time_override=None,
             title="Fast export preview",
         )
+        if show_eq:
+            marker_legend()
         st.caption(f"Fast preview displayed in {preview_elapsed:.1f} seconds. Repeated previews are cached.")
 
         st.divider()
@@ -898,6 +910,8 @@ with tab_render:
             st.info("Click Render high-quality export only after the fast preview looks right. The result will stay visible here until you render again or clear it.")
         else:
             st.image(saved_export["png"], use_container_width=True)
+            if show_eq:
+                marker_legend()
             st.caption(
                 f"Saved export render: {saved_export['quality']} mode, "
                 f"seed override {saved_export['seed_override']}, time override {saved_export['time_override']}. "
@@ -939,4 +953,15 @@ with tab_about:
             """
         )
         pattern_vocab_card()
-        st.info("Marker convention: white/black + = origin, red × ≈ saddle-like peripheral point, green ○ ≈ center-like peripheral point. The current saddle/center labeling follows the MATLAB visual convention and should be verified for edge cases.")
+        st.subheader("How to read the markers")
+        st.markdown(
+            """
+            When **Show equilibrium markers** is enabled, the app overlays analytically detected equilibrium points:
+
+            - **red ×** = saddle equilibrium
+            - **green ○** = center equilibrium
+            - **white/black +** = origin
+
+            In the Hamiltonian case, centers are surrounded by closed orbits, while saddles organize separatrices, stars, and spider-net boundaries.
+            """
+        )
