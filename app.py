@@ -581,11 +581,11 @@ with st.sidebar:
 
 
 
-PAGES = ["Paper presets", "Sweep / zoom", "Explore", "Render / export", "About"]
+PAGES = ["About", "Paper presets", "Sweep / zoom", "Explore", "Render / export"]
 st.info("First load on Streamlit Cloud may be slow because figures are computed and cached. After that, repeated presets/settings should be faster.")
 st.caption("Cached version: the original tab interface is restored, while expensive plots are cached by parameter set and render settings.")
 
-tab_presets, tab_sweep, tab_explore, tab_render, tab_about = st.tabs(PAGES)
+tab_about, tab_presets, tab_sweep, tab_explore, tab_render = st.tabs(PAGES)
 
 with tab_presets:
     st.subheader("Paper preset selector")
